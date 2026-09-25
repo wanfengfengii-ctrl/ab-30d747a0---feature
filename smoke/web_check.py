@@ -45,6 +45,43 @@ def main():
     if resp.status != 200 or not data.get("feasible"):
         fail(f"经 nginx 的业务配平失败：{data}")
     print(f"  ✓ POST /api/balance 经 nginx 透传成功，序列 {data['tie_sequence']}")
+
+    # 缓升计划同样经 /api/ 反代可达
+    plan_payload = {
+        "source": {"id": "S"},
+        "nodes": [{"id": "N"}],
+        "zones": [{"id": "A"}, {"id": "B"}],
+        "pipes": [
+            {"id": "p1", "from": "S", "to": "N", "min": 0, "max": 10,
+             "preferred": 5, "max_adjust": 3},
+            {"id": "p2", "from": "N", "to": "A", "min": 0, "max": 10,
+             "preferred": 3, "max_adjust": 2},
+            {"id": "p3", "from": "N", "to": "B", "min": 0, "max": 10,
+             "preferred": 7, "max_adjust": 2},
+            {"id": "p4", "from": "S", "to": "A", "min": 0, "max": 0,
+             "preferred": 0, "max_adjust": 0},
+        ],
+        "stages": [
+            {"source_total": 4,
+             "zones": [{"id": "A", "demand": 2}, {"id": "B", "demand": 2}]},
+            {"source_total": 7,
+             "zones": [{"id": "A", "demand": 4}, {"id": "B", "demand": 3}]},
+            {"source_total": 10,
+             "zones": [{"id": "A", "demand": 6}, {"id": "B", "demand": 4}]},
+        ],
+    }
+    req = urllib.request.Request(
+        BASE + "/api/plan",
+        data=json.dumps(plan_payload).encode("utf-8"),
+        headers={"Content-Type": "application/json"}, method="POST")
+    with urllib.request.urlopen(req, timeout=10) as resp:
+        data = json.loads(resp.read().decode("utf-8"))
+    if resp.status != 200 or not data.get("feasible"):
+        fail(f"经 nginx 的缓升计划求解失败：{data}")
+    if len(data.get("stages", [])) != 3 or len(data.get("adjustments", [])) != 2:
+        fail(f"缓升计划阶段/调整量结构异常：{data}")
+    print(f"  ✓ POST /api/plan 经 nginx 透传成功，"
+          f"三阶段序列 {data['tie_sequence']}")
     print("[web-smoke] Web/API 联调全部通过")
 
 
