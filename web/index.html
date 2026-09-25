@@ -1,0 +1,462 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>纸本修复室 · 雾化管路配平</title>
+<style>
+  :root {
+    --ink: #23272f; --muted: #6b7280; --line: #d8d4c8;
+    --paper: #fbf8f1; --card: #fffdf7; --accent: #2f6f5e;
+    --accent-soft: #e3efe9; --warn: #b54708; --warn-soft: #fdf3e3;
+    --bad: #b42318; --bad-soft: #fdeceb; --good: #067647;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; color: var(--ink); background: var(--paper);
+    font: 15px/1.6 "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
+  }
+  header {
+    padding: 20px 28px; border-bottom: 1px solid var(--line);
+    background: var(--card);
+  }
+  header h1 { margin: 0; font-size: 20px; }
+  header p { margin: 4px 0 0; color: var(--muted); font-size: 13px; }
+  main { max-width: 1080px; margin: 22px auto 60px; padding: 0 20px; }
+  .card {
+    background: var(--card); border: 1px solid var(--line);
+    border-radius: 10px; padding: 18px 20px; margin-bottom: 18px;
+  }
+  .card h2 { font-size: 15px; margin: 0 0 12px; letter-spacing: .04em; }
+  .row { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; }
+  .row + .row { margin-top: 10px; }
+  label { font-size: 13px; color: var(--muted); }
+  input[type=text], input[type=number], select {
+    border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px;
+    font: inherit; background: #fff; min-width: 0;
+  }
+  input[type=number] { width: 86px; }
+  input.wide { width: 150px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+  th, td { padding: 7px 8px; border-bottom: 1px solid var(--line); text-align: left; }
+  th { color: var(--muted); font-weight: 600; white-space: nowrap; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .pipe-row td { vertical-align: middle; }
+  .pipe-row select { min-width: 96px; }
+  .btn {
+    border: 1px solid var(--accent); background: var(--accent); color: #fff;
+    border-radius: 7px; padding: 7px 16px; font: inherit; cursor: pointer;
+  }
+  .btn.secondary { background: transparent; color: var(--accent); }
+  .btn.ghost { border-color: var(--line); color: var(--muted); background: transparent; }
+  .btn:disabled { opacity: .5; cursor: not-allowed; }
+  .btn.small { padding: 2px 8px; font-size: 12.5px; }
+  .actions { display: flex; gap: 12px; align-items: center; }
+  .hint { color: var(--muted); font-size: 12.5px; }
+  .badge {
+    display: inline-block; padding: 2px 10px; border-radius: 999px;
+    font-size: 12.5px; font-weight: 600;
+  }
+  .badge.ok { background: var(--accent-soft); color: var(--good); }
+  .badge.no { background: var(--bad-soft); color: var(--bad); }
+  .banner {
+    border-radius: 8px; padding: 10px 14px; margin-bottom: 14px; font-size: 14px;
+  }
+  .banner.error { background: var(--bad-soft); color: var(--bad); border: 1px solid #f3c2bd; }
+  .banner.warn { background: var(--warn-soft); color: var(--warn); border: 1px solid #f3d9b4; }
+  .zero { color: var(--good); font-weight: 600; }
+  .nonzero { color: var(--bad); font-weight: 600; }
+  .seq {
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    background: var(--accent-soft); border-radius: 6px; padding: 3px 8px;
+  }
+  .arrow { color: var(--muted); }
+  .muted { color: var(--muted); }
+  .reasons { margin: 0; padding-left: 20px; }
+  .reasons li { margin: 4px 0; }
+  .flow-cell { font-weight: 700; color: var(--accent); }
+  .order-tag {
+    display: inline-block; min-width: 20px; text-align: center;
+    background: var(--accent-soft); color: var(--accent);
+    border-radius: 4px; font-size: 12px; padding: 0 4px;
+  }
+  .del { color: var(--bad); cursor: pointer; border: none; background: none; font-size: 13px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>纸本修复室 · 雾化管路配平</h1>
+  <p>回湿脆化古画前，审核雾化管路能否把规定水量稳定送到每个分区：水源总量精确流出、分流节点收支相等、分区精确满足需求、各管流量落在最小/最大量内；先最小化相对优选量的绝对偏差和，再按管路录入顺序稳定决胜。</p>
+</header>
+<main>
+  <section class="card">
+    <div class="actions" style="justify-content: space-between">
+      <h2 style="margin:0">配平草稿</h2>
+      <div class="actions">
+        <button class="btn ghost" id="btn-sample" type="button">载入示例</button>
+        <button class="btn" id="btn-run" type="button">发起配平</button>
+      </div>
+    </div>
+    <div id="form-error"></div>
+
+    <h2 style="margin-top:16px">水源（一处）</h2>
+    <div class="row">
+      <label>水源编号
+        <input type="text" class="wide" id="source-id">
+      </label>
+      <label>水源总量
+        <input type="number" id="source-total" min="0" step="1">
+      </label>
+    </div>
+
+    <h2 style="margin-top:16px">分区（2 ~ 4 个）</h2>
+    <table>
+      <thead><tr><th>分区编号</th><th>精确需求量</th><th></th></tr></thead>
+      <tbody id="zone-body"></tbody>
+    </table>
+    <div class="row" style="margin-top:8px">
+      <button class="btn secondary small" type="button" id="btn-add-zone">添加分区</button>
+    </div>
+
+    <h2 style="margin-top:16px">分流节点（0 ~ 4 个）</h2>
+    <table>
+      <thead><tr><th>节点编号</th><th></th></tr></thead>
+      <tbody id="node-body"></tbody>
+    </table>
+    <div class="row" style="margin-top:8px">
+      <button class="btn secondary small" type="button" id="btn-add-node">添加分流节点</button>
+    </div>
+
+    <h2 style="margin-top:16px">管路（4 ~ 10 条，按方向连接）</h2>
+    <p class="hint">顺序即录入顺序，参与最优解的稳定决胜；可用 ↑/↓ 调整。起点只能是水源或分流节点，终点只能是分流节点或分区。</p>
+    <table>
+      <thead><tr>
+        <th style="width:34px">#</th><th>管路编号</th><th>起点</th><th></th><th>终点</th>
+        <th class="num">最小量</th><th class="num">优选量</th><th class="num">最大量</th><th></th>
+      </tr></thead>
+      <tbody id="pipe-body"></tbody>
+    </table>
+    <div class="row" style="margin-top:8px">
+      <button class="btn secondary small" type="button" id="btn-add-pipe">添加管路</button>
+    </div>
+  </section>
+
+  <section id="result"></section>
+</main>
+
+<script>
+"use strict";
+
+const state = {
+  source: { id: "S", total: 10 },
+  zones: [{ id: "A", demand: 6 }, { id: "B", demand: 4 }],
+  nodes: [{ id: "N" }],
+  pipes: [
+    { id: "p1", from: "S", to: "N", min: 0, preferred: 5, max: 10 },
+    { id: "p2", from: "N", to: "A", min: 0, preferred: 3, max: 10 },
+    { id: "p3", from: "N", to: "B", min: 0, preferred: 7, max: 10 },
+    { id: "p4", from: "S", to: "A", min: 0, preferred: 0, max: 0 },
+  ],
+};
+
+const $ = (id) => document.getElementById(id);
+
+function esc(s) {
+  return String(s).replace(/[&<>"']/g, (c) =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+function vertexOptions(selected, kind) {
+  const groups = [
+    { label: "水源", items: [state.source.id] },
+    { label: "分流节点", items: state.nodes.map((n) => n.id) },
+    { label: "分区", items: state.zones.map((z) => z.id) },
+  ];
+  const known = new Set(groups.flatMap((g) => g.items));
+  const stale = selected && !known.has(selected)
+    ? `<option value="${esc(selected)}" selected>⚠ ${esc(selected)}（已删除，请重选）</option>`
+    : "";
+  return stale + groups.map((g) => {
+    const opts = g.items.map((v) =>
+      `<option value="${esc(v)}"${v === selected ? " selected" : ""}>${esc(v)}</option>`
+    ).join("");
+    return `<optgroup label="${g.label}">${opts}</optgroup>`;
+  }).join("");
+}
+
+function render() {
+  $("source-id").value = state.source.id;
+  $("source-total").value = state.source.total;
+
+  $("zone-body").innerHTML = state.zones.map((z, i) => `
+    <tr>
+      <td><input type="text" value="${esc(z.id)}" onchange="updateZone(${i},'id',this.value)"></td>
+      <td><input type="number" min="0" step="1" value="${z.demand}" onchange="updateZone(${i},'demand',this.value)"></td>
+      <td><button class="del" type="button" onclick="removeZone(${i})">删除</button></td>
+    </tr>`).join("");
+
+  $("node-body").innerHTML = state.nodes.map((n, i) => `
+    <tr>
+      <td><input type="text" value="${esc(n.id)}" onchange="updateNode(${i},this.value)"></td>
+      <td><button class="del" type="button" onclick="removeNode(${i})">删除</button></td>
+    </tr>`).join("");
+
+  $("pipe-body").innerHTML = state.pipes.map((p, i) => `
+    <tr class="pipe-row">
+      <td><span class="order-tag">${i + 1}</span></td>
+      <td><input type="text" value="${esc(p.id)}" onchange="updatePipe(${i},'id',this.value)"></td>
+      <td><select onchange="updatePipe(${i},'from',this.value)">${vertexOptions(p.from)}</select></td>
+      <td class="arrow">→</td>
+      <td><select onchange="updatePipe(${i},'to',this.value)">${vertexOptions(p.to)}</select></td>
+      <td class="num"><input type="number" min="0" step="1" value="${p.min}" onchange="updatePipe(${i},'min',this.value)"></td>
+      <td class="num"><input type="number" min="0" step="1" value="${p.preferred}" onchange="updatePipe(${i},'preferred',this.value)"></td>
+      <td class="num"><input type="number" min="0" step="1" value="${p.max}" onchange="updatePipe(${i},'max',this.value)"></td>
+      <td style="white-space:nowrap">
+        <button class="del" type="button" title="上移" onclick="movePipe(${i},-1)">↑</button>
+        <button class="del" type="button" title="下移" onclick="movePipe(${i},1)">↓</button>
+        <button class="del" type="button" onclick="removePipe(${i})">删除</button>
+      </td>
+    </tr>`).join("");
+
+  $("btn-add-zone").disabled = state.zones.length >= 4;
+  $("btn-add-node").disabled = state.nodes.length >= 4;
+  $("btn-add-pipe").disabled = state.pipes.length >= 10;
+}
+
+function syncSource() {
+  state.source.id = $("source-id").value.trim();
+  state.source.total = Number($("source-total").value);
+}
+
+window.updateZone = (i, key, val) => {
+  syncSource();
+  state.zones[i][key] = key === "demand" ? Number(val) : val.trim();
+  render();
+};
+window.removeZone = (i) => {
+  if (state.zones.length <= 2) return;
+  state.zones.splice(i, 1);
+  render();
+};
+window.updateNode = (i, val) => {
+  syncSource();
+  state.nodes[i].id = val.trim();
+  render();
+};
+window.removeNode = (i) => {
+  state.nodes.splice(i, 1);
+  render();
+};
+window.updatePipe = (i, key, val) => {
+  syncSource();
+  if (["min", "preferred", "max"].includes(key)) val = Number(val);
+  else val = val.trim();
+  state.pipes[i][key] = val;
+};
+window.removePipe = (i) => {
+  if (state.pipes.length <= 4) return;
+  state.pipes.splice(i, 1);
+  render();
+};
+window.movePipe = (i, dir) => {
+  const j = i + dir;
+  if (j < 0 || j >= state.pipes.length) return;
+  [state.pipes[i], state.pipes[j]] = [state.pipes[j], state.pipes[i]];
+  render();
+};
+
+$("btn-add-zone").addEventListener("click", () => {
+  syncSource();
+  if (state.zones.length < 4) {
+    state.zones.push({ id: `Z${state.zones.length + 1}`, demand: 0 });
+    render();
+  }
+});
+$("btn-add-node").addEventListener("click", () => {
+  syncSource();
+  if (state.nodes.length < 4) {
+    state.nodes.push({ id: `N${state.nodes.length + 1}` });
+    render();
+  }
+});
+$("btn-add-pipe").addEventListener("click", () => {
+  syncSource();
+  if (state.pipes.length < 10) {
+    const n = state.pipes.length + 1;
+    state.pipes.push({
+      id: `p${n}`, from: state.source.id,
+      to: state.zones[0] ? state.zones[0].id : "",
+      min: 0, preferred: 0, max: 5,
+    });
+    render();
+  }
+});
+$("btn-sample").addEventListener("click", () => {
+  document.getElementById("result").innerHTML = "";
+  document.getElementById("form-error").innerHTML = "";
+  state.source = { id: "S", total: 10 };
+  state.zones = [{ id: "A", demand: 6 }, { id: "B", demand: 4 }];
+  state.nodes = [{ id: "N" }];
+  state.pipes = [
+    { id: "p1", from: "S", to: "N", min: 0, preferred: 5, max: 10 },
+    { id: "p2", from: "N", to: "A", min: 0, preferred: 3, max: 10 },
+    { id: "p3", from: "N", to: "B", min: 0, preferred: 7, max: 10 },
+    { id: "p4", from: "S", to: "A", min: 0, preferred: 0, max: 0 },
+  ];
+  render();
+});
+
+function buildPayload() {
+  syncSource();
+  return {
+    source: { id: state.source.id },
+    source_total: state.source.total,
+    zones: state.zones.map((z) => ({ id: z.id, demand: z.demand })),
+    nodes: state.nodes.map((n) => ({ id: n.id })),
+    pipes: state.pipes.map((p) => ({
+      id: p.id, from: p.from, to: p.to,
+      min: p.min, max: p.max, preferred: p.preferred,
+    })),
+  };
+}
+
+function diffCell(d) {
+  const cls = d === 0 ? "zero" : "nonzero";
+  return `<td class="num ${cls}">${d > 0 ? "+" : ""}${d}</td>`;
+}
+
+function renderFeasible(r) {
+  const seq = r.tie_sequence.map((x) => esc(x)).join(", ");
+  const pipesHtml = r.flows.map((f) => `
+    <tr>
+      <td><span class="order-tag">${f.order + 1}</span></td>
+      <td>${esc(f.pipe_id)}</td>
+      <td>${esc(f.from)} <span class="arrow">→</span> ${esc(f.to)}</td>
+      <td class="num">${f.min}</td>
+      <td class="num muted">${f.preferred}</td>
+      <td class="num">${f.max}</td>
+      <td class="num flow-cell">${f.flow}</td>
+      <td class="num">${f.deviation}</td>
+    </tr>`).join("");
+
+  const src = r.balances.source;
+  const nodesHtml = r.balances.nodes.length
+    ? r.balances.nodes.map((n) => `
+      <tr><td>${esc(n.id)} <span class="muted">分流节点</span></td>
+        <td class="num">${n.inflow}</td><td class="num">${n.outflow}</td>
+        ${diffCell(n.difference)}</tr>`).join("")
+    : `<tr><td colspan="4" class="muted">无分流节点</td></tr>`;
+
+  const zonesHtml = r.balances.zones.map((z) => `
+    <tr><td>${esc(z.id)} <span class="muted">分区</span></td>
+      <td class="num">${z.inflow}</td><td class="num">${z.demand}</td>
+      ${diffCell(z.difference)}</tr>`).join("");
+
+  $("result").innerHTML = `
+    <section class="card">
+      <div class="row" style="justify-content:space-between">
+        <h2 style="margin:0">配平结果　<span class="badge ok">可行方案</span></h2>
+        <div class="hint">相对优选量绝对偏差和 = <b>${r.objective}</b></div>
+      </div>
+      <p class="hint" style="margin-top:8px">
+        决胜流量序列（按管路录入顺序）：<span class="seq">[${seq}]</span>
+      </p>
+      <h2 style="margin-top:14px">逐管流量</h2>
+      <table>
+        <thead><tr>
+          <th style="width:34px">#</th><th>管路</th><th>方向</th>
+          <th class="num">最小量</th><th class="num">优选量</th><th class="num">最大量</th>
+          <th class="num">配平流量</th><th class="num">偏差</th>
+        </tr></thead>
+        <tbody>${pipesHtml}</tbody>
+      </table>
+
+      <h2 style="margin-top:16px">节点收支</h2>
+      <table>
+        <thead><tr><th>节点</th><th class="num">流入</th><th class="num">流出/需求</th><th class="num">收-支 差额</th></tr></thead>
+        <tbody>
+          <tr><td>${esc(src.id)} <span class="muted">水源</span></td>
+            <td class="num">—</td><td class="num">${src.outflow} / 总量 ${src.total}</td>
+            ${diffCell(src.difference)}</tr>
+          ${nodesHtml}
+          ${zonesHtml}
+        </tbody>
+      </table>
+    </section>`;
+}
+
+function renderInfeasible(r) {
+  const info = r.infeasibility;
+  const reasons = info.reasons.map((t) => `<li>${esc(t)}</li>`).join("");
+  const defRows = info.deficits.map((d) => `
+    <tr><td>${esc(d.vertex)}</td><td>${esc(d.kind)}</td>
+      <td class="num">${d.shortfall}</td></tr>`).join("");
+  const surRows = info.surpluses.map((s) => `
+    <tr><td>${esc(s.vertex)}</td><td>${esc(s.kind)}</td>
+      <td class="num">${s.excess}</td></tr>`).join("");
+
+  $("result").innerHTML = `
+    <section class="card">
+      <h2>配平结果　<span class="badge no">不可行</span></h2>
+      <div class="banner warn">
+        水源总量 <b>${info.source_total}</b>，分区需求合计 <b>${info.total_demand}</b>；
+        需补入网络的守恒流量 <b>${Math.max(info.ss_required, info.tt_required)}</b> 单位，
+        实际只能成立 <b>${info.achieved_flow}</b> 单位
+        （缺口 <b>${info.shortfall_flow}</b>）。
+      </div>
+      <h2>结论与原因</h2>
+      <ul class="reasons">${reasons}</ul>
+      <div class="row" style="align-items:flex-start; margin-top:10px">
+        <div style="flex:1">
+          <h2>进水不足点</h2>
+          <table><thead><tr><th>编号</th><th>类型</th><th class="num">缺口</th></tr></thead>
+            <tbody>${defRows || '<tr><td colspan="3" class="muted">无</td></tr>'}</tbody></table>
+        </div>
+        <div style="flex:1">
+          <h2>来水积压点</h2>
+          <table><thead><tr><th>编号</th><th>类型</th><th class="num">积压</th></tr></thead>
+            <tbody>${surRows || '<tr><td colspan="3" class="muted">无</td></tr>'}</tbody></table>
+        </div>
+      </div>
+      <p class="hint" style="margin-top:10px">
+        提示：不要只看某条支路的余量——请同时检查每个分区的进水总容量、各分流点下游出路，以及水源总量与需求合计是否相等。
+      </p>
+    </section>`;
+}
+
+$("btn-run").addEventListener("click", async () => {
+  const errBox = $("form-error");
+  errBox.innerHTML = "";
+  $("result").innerHTML = "";
+  const btn = $("btn-run");
+  btn.disabled = true;
+  btn.textContent = "配平中…";
+  try {
+    const resp = await fetch("/api/balance", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(buildPayload()),
+    });
+    const data = await resp.json();
+    if (resp.status === 400) {
+      errBox.innerHTML = `<div class="banner error">草稿未通过校验：${esc(data.error)}</div>`;
+      return;
+    }
+    if (!resp.ok) {
+      errBox.innerHTML = `<div class="banner error">服务异常（HTTP ${resp.status}），请稍后重试。</div>`;
+      return;
+    }
+    if (data.feasible) renderFeasible(data);
+    else renderInfeasible(data);
+  } catch (e) {
+    errBox.innerHTML = `<div class="banner error">无法连接配平服务：${esc(e.message)}</div>`;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "发起配平";
+  }
+});
+
+render();
+</script>
+</body>
+</html>

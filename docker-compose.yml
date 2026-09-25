@@ -1,0 +1,59 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: api
+    image: fog-balance-api:latest
+    environment:
+      HOST: 0.0.0.0
+      PORT: "8000"
+    expose:
+      - "8000"
+    # 宿主机端口可配置：API_PORT=9000 docker compose up
+    ports:
+      - "${API_PORT:-8000}:8000"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=3).status == 200 else 1)"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: web
+    image: fog-balance-web:latest
+    depends_on:
+      api:
+        condition: service_healthy
+    expose:
+      - "80"
+    # 宿主机端口可配置：WEB_PORT=8081 docker compose up
+    ports:
+      - "${WEB_PORT:-8080}:80"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+
+  verify:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: verify
+    image: fog-balance-verify:latest
+    depends_on:
+      api:
+        condition: service_healthy
+      web:
+        condition: service_healthy
+    # 一次性验收：跑完测试/构建核查/API 冒烟/Web 联调即自行退出，
+    # 退出码即验收结论（0 通过，非 0 失败）。不映射端口、不常驻。
+    restart: "no"
