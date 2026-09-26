@@ -81,6 +81,17 @@
     border-radius: 4px; font-size: 12px; padding: 0 4px;
   }
   .del { color: var(--bad); cursor: pointer; border: none; background: none; font-size: 13px; }
+  .stage-head { display: flex; align-items: center; gap: 10px; margin: 0 0 10px; }
+  .stage-head h2 { margin: 0; }
+  .stage-table input[type=number] { width: 76px; }
+  .plan-block { border-left: 3px solid var(--accent); padding-left: 14px; margin-bottom: 18px; }
+  .change-ok { color: var(--good); font-weight: 600; }
+  .change-bad { color: var(--bad); font-weight: 700; }
+  .sticky-note {
+    background: var(--warn-soft); border: 1px solid #f3d9b4;
+    border-radius: 8px; padding: 8px 12px; font-size: 12.5px; color: var(--warn);
+    margin-bottom: 12px;
+  }
 </style>
 </head>
 <body>
@@ -102,10 +113,10 @@
     <h2 style="margin-top:16px">水源（一处）</h2>
     <div class="row">
       <label>水源编号
-        <input type="text" class="wide" id="source-id">
+        <input type="text" class="wide" id="source-id" onchange="invalidateResults()">
       </label>
       <label>水源总量
-        <input type="number" id="source-total" min="0" step="1">
+        <input type="number" id="source-total" min="0" step="1" onchange="invalidateResults()">
       </label>
     </div>
 
@@ -128,16 +139,38 @@
     </div>
 
     <h2 style="margin-top:16px">管路（4 ~ 10 条，按方向连接）</h2>
-    <p class="hint">顺序即录入顺序，参与最优解的稳定决胜；可用 ↑/↓ 调整。起点只能是水源或分流节点，终点只能是分流节点或分区。</p>
+    <p class="hint">顺序即录入顺序，参与最优解的稳定决胜；可用 ↑/↓ 调整。起点只能是水源或分流节点，终点只能是分流节点或分区。"调节上限"是缓升计划专用的相邻阶段最大调节量。</p>
     <table>
       <thead><tr>
         <th style="width:34px">#</th><th>管路编号</th><th>起点</th><th></th><th>终点</th>
-        <th class="num">最小量</th><th class="num">优选量</th><th class="num">最大量</th><th></th>
+        <th class="num">最小量</th><th class="num">优选量</th><th class="num">最大量</th>
+        <th class="num">调节上限</th><th></th>
       </tr></thead>
       <tbody id="pipe-body"></tbody>
     </table>
     <div class="row" style="margin-top:8px">
       <button class="btn secondary small" type="button" id="btn-add-pipe">添加管路</button>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="actions" style="justify-content: space-between">
+      <h2 style="margin:0">缓升计划（2 ~ 4 个湿润阶段，联合配平）</h2>
+      <div class="actions">
+        <button class="btn ghost" id="btn-plan-sample" type="button">载入缓升示例</button>
+        <button class="btn" id="btn-plan" type="button">生成缓升计划</button>
+      </div>
+    </div>
+    <p class="hint" style="margin-top:8px">
+      在上方草稿基础上录入按顺序的湿润阶段：每阶段填写水源总量与各分区精确需求；
+      每条管路的"调节上限"约束相邻阶段流量差。服务端把全部阶段放进同一个模型联合求解，
+      不逐阶段独立配平后再拼接。
+    </p>
+    <div id="plan-error"></div>
+    <div id="stage-list"></div>
+    <div class="row" style="margin-top:6px">
+      <button class="btn secondary small" type="button" id="btn-add-stage">添加阶段</button>
+      <span class="hint">阶段顺序即回湿顺序；修改草稿或任一阶段输入后，已生成的旧计划会立即失效清除。</span>
     </div>
   </section>
 
@@ -152,14 +185,27 @@ const state = {
   zones: [{ id: "A", demand: 6 }, { id: "B", demand: 4 }],
   nodes: [{ id: "N" }],
   pipes: [
-    { id: "p1", from: "S", to: "N", min: 0, preferred: 5, max: 10 },
-    { id: "p2", from: "N", to: "A", min: 0, preferred: 3, max: 10 },
-    { id: "p3", from: "N", to: "B", min: 0, preferred: 7, max: 10 },
-    { id: "p4", from: "S", to: "A", min: 0, preferred: 0, max: 0 },
+    { id: "p1", from: "S", to: "N", min: 0, preferred: 5, max: 10, max_adjust: 2 },
+    { id: "p2", from: "N", to: "A", min: 0, preferred: 3, max: 10, max_adjust: 2 },
+    { id: "p3", from: "N", to: "B", min: 0, preferred: 7, max: 10, max_adjust: 2 },
+    { id: "p4", from: "S", to: "A", min: 0, preferred: 0, max: 0, max_adjust: 2 },
+  ],
+  stages: [
+    { total: 10, demands: { A: 6, B: 4 } },
+    { total: 10, demands: { A: 8, B: 2 } },
   ],
 };
 
 const $ = (id) => document.getElementById(id);
+
+// 任何草稿/阶段输入修改都会使已展示的配平结果与缓升计划失效：
+// 立即清空，避免旧计划在新草稿旁继续显示。
+function invalidateResults() {
+  $("result").innerHTML = "";
+  $("form-error").innerHTML = "";
+  const pe = $("plan-error");
+  if (pe) pe.innerHTML = "";
+}
 
 function esc(s) {
   return String(s).replace(/[&<>"']/g, (c) =>
@@ -211,6 +257,7 @@ function render() {
       <td class="num"><input type="number" min="0" step="1" value="${p.min}" onchange="updatePipe(${i},'min',this.value)"></td>
       <td class="num"><input type="number" min="0" step="1" value="${p.preferred}" onchange="updatePipe(${i},'preferred',this.value)"></td>
       <td class="num"><input type="number" min="0" step="1" value="${p.max}" onchange="updatePipe(${i},'max',this.value)"></td>
+      <td class="num"><input type="number" min="0" step="1" value="${p.max_adjust ?? 0}" onchange="updatePipe(${i},'max_adjust',this.value)"></td>
       <td style="white-space:nowrap">
         <button class="del" type="button" title="上移" onclick="movePipe(${i},-1)">↑</button>
         <button class="del" type="button" title="下移" onclick="movePipe(${i},1)">↓</button>
@@ -221,6 +268,32 @@ function render() {
   $("btn-add-zone").disabled = state.zones.length >= 4;
   $("btn-add-node").disabled = state.nodes.length >= 4;
   $("btn-add-pipe").disabled = state.pipes.length >= 10;
+  renderStages();
+}
+
+function renderStages() {
+  const zoneHeaders = state.zones.map((z) =>
+    `<th class="num">分区 ${esc(z.id)} 需求</th>`).join("");
+  $("stage-list").innerHTML = `
+    <table class="stage-table">
+      <thead><tr><th style="width:150px">阶段</th>
+        <th class="num">水源总量</th>${zoneHeaders}<th></th></tr></thead>
+      <tbody>${state.stages.map((st, k) => `
+        <tr>
+          <td><b>第 ${k + 1} 阶段</b>${k === 0 ? ' <span class="hint">（起始）</span>' : ""}</td>
+          <td class="num"><input type="number" min="0" step="1" value="${st.total}"
+             onchange="updateStage(${k},'total',this.value)"></td>
+          ${state.zones.map((z) => `
+            <td class="num"><input type="number" min="0" step="1"
+               value="${st.demands[z.id] ?? 0}"
+               onchange="updateStageDemand(${k},'${esc(z.id)}',this.value)"></td>`).join("")}
+          <td>${state.stages.length > 2
+            ? `<button class="del" type="button" onclick="removeStage(${k})">删除</button>`
+            : ""}</td>
+        </tr>`).join("")}
+      </tbody>
+    </table>`;
+  $("btn-add-stage").disabled = state.stages.length >= 4;
 }
 
 function syncSource() {
@@ -228,47 +301,93 @@ function syncSource() {
   state.source.total = Number($("source-total").value);
 }
 
+// 分区增删改名后，把各阶段需求表对齐到当前分区名单（新分区补 0）
+function syncStageDemands() {
+  const ids = state.zones.map((z) => z.id);
+  for (const st of state.stages) {
+    const next = {};
+    for (const id of ids) next[id] = st.demands[id] ?? 0;
+    st.demands = next;
+  }
+}
+
 window.updateZone = (i, key, val) => {
   syncSource();
   state.zones[i][key] = key === "demand" ? Number(val) : val.trim();
+  syncStageDemands();
+  invalidateResults();
   render();
 };
 window.removeZone = (i) => {
   if (state.zones.length <= 2) return;
   state.zones.splice(i, 1);
+  syncStageDemands();
+  invalidateResults();
   render();
 };
 window.updateNode = (i, val) => {
   syncSource();
   state.nodes[i].id = val.trim();
+  invalidateResults();
   render();
 };
 window.removeNode = (i) => {
   state.nodes.splice(i, 1);
+  invalidateResults();
   render();
 };
 window.updatePipe = (i, key, val) => {
   syncSource();
-  if (["min", "preferred", "max"].includes(key)) val = Number(val);
+  if (["min", "preferred", "max", "max_adjust"].includes(key)) val = Number(val);
   else val = val.trim();
   state.pipes[i][key] = val;
+  invalidateResults();
 };
 window.removePipe = (i) => {
   if (state.pipes.length <= 4) return;
   state.pipes.splice(i, 1);
+  invalidateResults();
   render();
 };
 window.movePipe = (i, dir) => {
   const j = i + dir;
   if (j < 0 || j >= state.pipes.length) return;
   [state.pipes[i], state.pipes[j]] = [state.pipes[j], state.pipes[i]];
+  invalidateResults();
   render();
 };
+
+window.updateStage = (k, key, val) => {
+  state.stages[k][key] = Number(val);
+  invalidateResults();
+};
+window.updateStageDemand = (k, zid, val) => {
+  state.stages[k].demands[zid] = Number(val);
+  invalidateResults();
+};
+window.removeStage = (k) => {
+  if (state.stages.length <= 2) return;
+  state.stages.splice(k, 1);
+  invalidateResults();
+  render();
+};
+
+$("btn-add-stage").addEventListener("click", () => {
+  if (state.stages.length >= 4) return;
+  const last = state.stages[state.stages.length - 1];
+  const demands = {};
+  for (const z of state.zones) demands[z.id] = last ? last.demands[z.id] ?? 0 : 0;
+  state.stages.push({ total: last ? last.total : 0, demands });
+  invalidateResults();
+  render();
+});
 
 $("btn-add-zone").addEventListener("click", () => {
   syncSource();
   if (state.zones.length < 4) {
     state.zones.push({ id: `Z${state.zones.length + 1}`, demand: 0 });
+    syncStageDemands();
+    invalidateResults();
     render();
   }
 });
@@ -276,6 +395,7 @@ $("btn-add-node").addEventListener("click", () => {
   syncSource();
   if (state.nodes.length < 4) {
     state.nodes.push({ id: `N${state.nodes.length + 1}` });
+    invalidateResults();
     render();
   }
 });
@@ -286,22 +406,41 @@ $("btn-add-pipe").addEventListener("click", () => {
     state.pipes.push({
       id: `p${n}`, from: state.source.id,
       to: state.zones[0] ? state.zones[0].id : "",
-      min: 0, preferred: 0, max: 5,
+      min: 0, preferred: 0, max: 5, max_adjust: 2,
     });
+    invalidateResults();
     render();
   }
 });
 $("btn-sample").addEventListener("click", () => {
-  document.getElementById("result").innerHTML = "";
-  document.getElementById("form-error").innerHTML = "";
+  invalidateResults();
   state.source = { id: "S", total: 10 };
   state.zones = [{ id: "A", demand: 6 }, { id: "B", demand: 4 }];
   state.nodes = [{ id: "N" }];
   state.pipes = [
-    { id: "p1", from: "S", to: "N", min: 0, preferred: 5, max: 10 },
-    { id: "p2", from: "N", to: "A", min: 0, preferred: 3, max: 10 },
-    { id: "p3", from: "N", to: "B", min: 0, preferred: 7, max: 10 },
-    { id: "p4", from: "S", to: "A", min: 0, preferred: 0, max: 0 },
+    { id: "p1", from: "S", to: "N", min: 0, preferred: 5, max: 10, max_adjust: 2 },
+    { id: "p2", from: "N", to: "A", min: 0, preferred: 3, max: 10, max_adjust: 2 },
+    { id: "p3", from: "N", to: "B", min: 0, preferred: 7, max: 10, max_adjust: 2 },
+    { id: "p4", from: "S", to: "A", min: 0, preferred: 0, max: 0, max_adjust: 2 },
+  ];
+  syncStageDemands();
+  render();
+});
+$("btn-plan-sample").addEventListener("click", () => {
+  invalidateResults();
+  state.source = { id: "S", total: 10 };
+  state.zones = [{ id: "A", demand: 6 }, { id: "B", demand: 4 }];
+  state.nodes = [{ id: "N" }];
+  state.pipes = [
+    { id: "p1", from: "S", to: "N", min: 0, preferred: 5, max: 10, max_adjust: 2 },
+    { id: "p2", from: "N", to: "A", min: 0, preferred: 3, max: 10, max_adjust: 2 },
+    { id: "p3", from: "N", to: "B", min: 0, preferred: 7, max: 10, max_adjust: 2 },
+    { id: "p4", from: "S", to: "A", min: 0, preferred: 0, max: 0, max_adjust: 2 },
+  ];
+  state.stages = [
+    { total: 10, demands: { A: 6, B: 4 } },
+    { total: 10, demands: { A: 8, B: 2 } },
+    { total: 10, demands: { A: 6, B: 4 } },
   ];
   render();
 });
@@ -316,6 +455,25 @@ function buildPayload() {
     pipes: state.pipes.map((p) => ({
       id: p.id, from: p.from, to: p.to,
       min: p.min, max: p.max, preferred: p.preferred,
+    })),
+  };
+}
+
+function buildPlanPayload() {
+  syncSource();
+  return {
+    source: { id: state.source.id },
+    source_total: state.source.total,
+    zones: state.zones.map((z) => ({ id: z.id, demand: z.demand })),
+    nodes: state.nodes.map((n) => ({ id: n.id })),
+    pipes: state.pipes.map((p) => ({
+      id: p.id, from: p.from, to: p.to,
+      min: p.min, max: p.max, preferred: p.preferred,
+      max_adjust: p.max_adjust ?? 0,
+    })),
+    stages: state.stages.map((st) => ({
+      source_total: st.total,
+      zones: state.zones.map((z) => ({ id: z.id, demand: st.demands[z.id] ?? 0 })),
     })),
   };
 }
@@ -453,6 +611,189 @@ $("btn-run").addEventListener("click", async () => {
   } finally {
     btn.disabled = false;
     btn.textContent = "发起配平";
+  }
+});
+
+function changeCell(change, limit) {
+  if (change === null || change === undefined) return `<td class="num muted">—</td>`;
+  const cls = change <= limit ? "change-ok" : "change-bad";
+  return `<td class="num ${cls}">±${change} / ≤${limit}</td>`;
+}
+
+function renderPlanFeasible(r) {
+  const seq = r.tie_sequence.map((x) => esc(x)).join(", ");
+  const stageHtml = r.stages.map((s) => {
+    const flowRows = s.flows.map((f) => `
+      <tr>
+        <td><span class="order-tag">${f.order + 1}</span></td>
+        <td>${esc(f.pipe_id)}</td>
+        <td>${esc(f.from)} <span class="arrow">→</span> ${esc(f.to)}</td>
+        <td class="num muted">${f.preferred}</td>
+        <td class="num flow-cell">${f.flow}</td>
+        <td class="num">${f.deviation}</td>
+        ${changeCell(f.change, f.change_limit)}
+      </tr>`).join("");
+    const src = s.balances.source;
+    const balRows = [
+      `<tr><td>${esc(src.id)} <span class="muted">水源</span></td>
+        <td class="num">—</td><td class="num">${src.outflow} / 总量 ${src.total}</td>
+        ${diffCell(src.difference)}</tr>`,
+      ...s.balances.nodes.map((n) => `
+        <tr><td>${esc(n.id)} <span class="muted">分流节点</span></td>
+          <td class="num">${n.inflow}</td><td class="num">${n.outflow}</td>
+          ${diffCell(n.difference)}</tr>`),
+      ...s.balances.zones.map((z) => `
+        <tr><td>${esc(z.id)} <span class="muted">分区</span></td>
+          <td class="num">${z.inflow}</td><td class="num">需求 ${z.demand}</td>
+          ${diffCell(z.difference)}</tr>`),
+    ].join("");
+    return `
+      <div class="plan-block">
+        <h2>第 ${s.index + 1} 阶段　<span class="hint">水源总量 ${s.source_total}，本阶段偏差和 ${s.objective}</span></h2>
+        <table>
+          <thead><tr>
+            <th style="width:34px">#</th><th>管路</th><th>方向</th>
+            <th class="num">优选量</th><th class="num">流量</th><th class="num">偏差</th>
+            <th class="num">较上阶段调整 / 上限</th>
+          </tr></thead>
+          <tbody>${flowRows}</tbody>
+        </table>
+        <table style="margin-top:8px">
+          <thead><tr><th>节点</th><th class="num">流入</th><th class="num">流出/需求</th><th class="num">收-支 差额</th></tr></thead>
+          <tbody>${balRows}</tbody>
+        </table>
+      </div>`;
+  }).join("");
+
+  const adjHtml = r.adjustments.map((a) => `
+    <tr>
+      <td>第 ${a.from_stage + 1} → 第 ${a.to_stage + 1} 阶段</td>
+      <td>${a.pipes.map((p) =>
+        `<span class="seq">${esc(p.pipe_id)} ±${p.change}</span>`).join(" ")}
+      </td>
+      <td>${a.within_limit
+        ? '<span class="badge ok">全部未越限</span>'
+        : '<span class="badge no">存在越限</span>'}</td>
+    </tr>`).join("");
+
+  $("result").innerHTML = `
+    <section class="card">
+      <div class="row" style="justify-content:space-between">
+        <h2 style="margin:0">缓升计划　<span class="badge ok">可行（${r.stage_count} 阶段联合配平）</span></h2>
+        <div class="hint">全阶段相对优选量绝对偏差总和 = <b>${r.objective}</b></div>
+      </div>
+      <p class="hint" style="margin-top:8px">
+        决胜流量序列（阶段顺序 × 管路录入顺序展平）：<span class="seq">[${seq}]</span>
+      </p>
+      ${stageHtml}
+      <h2 style="margin-top:6px">相邻阶段调整量总览</h2>
+      <table>
+        <thead><tr><th>阶段衔接</th><th>逐管调整量</th><th>调节约束</th></tr></thead>
+        <tbody>${adjHtml}</tbody>
+      </table>
+    </section>`;
+}
+
+function renderPlanInfeasible(r) {
+  const info = r.infeasibility;
+  const reasons = info.reasons.map((t) => `<li>${esc(t)}</li>`).join("");
+  const kindLabel = info.kind === "adjustment" ? "相邻调节约束不可行" : "阶段自身不守恒";
+  const blockedRows = (info.blocked_pipes || []).map((b) => `
+    <tr>
+      <td>${esc(b.pipe_id)}</td>
+      <td>${esc(b.from)} <span class="arrow">→</span> ${esc(b.to)}</td>
+      <td class="num">${b.anchor_flow}</td>
+      <td class="num">${b.required_flow}</td>
+      <td class="num">${b.required_change}</td>
+      <td class="num">${b.allowed_change}</td>
+      <td class="num change-bad">${b.excess}</td>
+    </tr>`).join("");
+  const relaxedRows = (info.relaxed_stage_flows || []).map((f) => `
+    <tr>
+      <td>${esc(f.pipe_id)}</td>
+      <td class="num muted">${f.anchor_flow}</td>
+      <td class="num flow-cell">${f.flow}</td>
+      ${changeCell(f.change, f.change_limit)}
+    </tr>`).join("");
+  const defRows = (info.deficits || []).map((d) => `
+    <tr><td>${esc(d.vertex)}</td><td>${esc(d.kind)}</td>
+      <td class="num">${d.shortfall}</td></tr>`).join("");
+  const surRows = (info.surpluses || []).map((s) => `
+    <tr><td>${esc(s.vertex)}</td><td>${esc(s.kind)}</td>
+      <td class="num">${s.excess}</td></tr>`).join("");
+
+  $("result").innerHTML = `
+    <section class="card">
+      <h2>缓升计划　<span class="badge no">不可行</span>　<span class="hint">${kindLabel}</span></h2>
+      <div class="banner warn">
+        最早失败阶段：第 <b>${(info.failing_stage ?? 0) + 1}</b> 阶段
+        ${info.kind === "adjustment"
+          ? `——无法与前 ${info.failing_stage} 个阶段同时满足相邻调节约束，
+             越限缺口合计 <b>${info.gap_total}</b>`
+          : "——该阶段自身的水源/节点/分区守恒或管路上限已不成立"}
+      </div>
+      <h2>结论与原因</h2>
+      <ul class="reasons">${reasons}</ul>
+      ${blockedRows ? `
+        <h2 style="margin-top:12px">受限管路（按前序联合最优配水无法按时调节到位）</h2>
+        <table>
+          <thead><tr><th>管路</th><th>方向</th><th class="num">前序末段流量</th>
+            <th class="num">本阶段所需</th><th class="num">所需变化</th>
+            <th class="num">允许调节量</th><th class="num">缺口</th></tr></thead>
+          <tbody>${blockedRows}</tbody>
+        </table>` : ""}
+      ${relaxedRows ? `
+        <h2 style="margin-top:12px">放松调节后的第 ${(info.failing_stage ?? 0) + 1} 阶段参考配水（非可行计划）</h2>
+        <table>
+          <thead><tr><th>管路</th><th class="num">前序末段流量</th>
+            <th class="num">放松后流量</th><th class="num">调整量 / 上限</th></tr></thead>
+          <tbody>${relaxedRows}</tbody>
+        </table>` : ""}
+      ${defRows || surRows ? `
+        <div class="row" style="align-items:flex-start; margin-top:10px">
+          <div style="flex:1">
+            <h2>进水不足点</h2>
+            <table><thead><tr><th>编号</th><th>类型</th><th class="num">缺口</th></tr></thead>
+              <tbody>${defRows || '<tr><td colspan="3" class="muted">无</td></tr>'}</tbody></table>
+          </div>
+          <div style="flex:1">
+            <h2>来水积压点</h2>
+            <table><thead><tr><th>编号</th><th>类型</th><th class="num">积压</th></tr></thead>
+              <tbody>${surRows || '<tr><td colspan="3" class="muted">无</td></tr>'}</tbody></table>
+          </div>
+        </div>` : ""}
+    </section>`;
+}
+
+$("btn-plan").addEventListener("click", async () => {
+  const errBox = $("plan-error");
+  errBox.innerHTML = "";
+  $("result").innerHTML = "";
+  const btn = $("btn-plan");
+  btn.disabled = true;
+  btn.textContent = "联合求解中…";
+  try {
+    const resp = await fetch("/api/plan", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(buildPlanPayload()),
+    });
+    const data = await resp.json();
+    if (resp.status === 400) {
+      errBox.innerHTML = `<div class="banner error">缓升计划未通过校验：${esc(data.error)}</div>`;
+      return;
+    }
+    if (!resp.ok) {
+      errBox.innerHTML = `<div class="banner error">服务异常（HTTP ${resp.status}），请稍后重试。</div>`;
+      return;
+    }
+    if (data.feasible) renderPlanFeasible(data);
+    else renderPlanInfeasible(data);
+  } catch (e) {
+    errBox.innerHTML = `<div class="banner error">无法连接配平服务：${esc(e.message)}</div>`;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "生成缓升计划";
   }
 });
 

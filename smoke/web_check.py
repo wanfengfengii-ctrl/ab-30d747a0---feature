@@ -45,6 +45,28 @@ def main():
     if resp.status != 200 or not data.get("feasible"):
         fail(f"经 nginx 的业务配平失败：{data}")
     print(f"  ✓ POST /api/balance 经 nginx 透传成功，序列 {data['tie_sequence']}")
+
+    # 缓升计划经同一反代透传
+    plan_payload = json.loads(json.dumps(payload))
+    for p in plan_payload["pipes"]:
+        p["max_adjust"] = 2
+    plan_payload["stages"] = [
+        {"source_total": 10,
+         "zones": [{"id": "A", "demand": 6}, {"id": "B", "demand": 4}]},
+        {"source_total": 10,
+         "zones": [{"id": "A", "demand": 8}, {"id": "B", "demand": 2}]},
+    ]
+    req = urllib.request.Request(
+        BASE + "/api/plan",
+        data=json.dumps(plan_payload).encode("utf-8"),
+        headers={"Content-Type": "application/json"}, method="POST")
+    with urllib.request.urlopen(req, timeout=10) as resp:
+        data = json.loads(resp.read().decode("utf-8"))
+    if resp.status != 200 or not data.get("feasible") or data.get("stage_count") != 2:
+        fail(f"经 nginx 的缓升计划失败：{data}")
+    if data["tie_sequence"] != [10, 6, 4, 0, 10, 8, 2, 0]:
+        fail(f"缓升计划展平序列异常：{data['tie_sequence']}")
+    print(f"  ✓ POST /api/plan 经 nginx 透传成功，展平序列 {data['tie_sequence']}")
     print("[web-smoke] Web/API 联调全部通过")
 
 
